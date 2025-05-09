@@ -5,7 +5,10 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher.filters import Text
 
-API_TOKEN = '7434543818:AAFBagR6tvHaopcGG7JP88PKhZvqAfF1O5o'
+import os
+from aiogram import Bot
+
+bot = Bot(token=os.getenv("BOT_TOKEN"))
 OPERATOR_ID = 7630696066  # Замінити на свій Telegram ID
 
 bot = Bot(token=API_TOKEN)
