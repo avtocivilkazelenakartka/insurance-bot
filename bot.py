@@ -1,3 +1,4 @@
+import os
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -5,14 +6,12 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher.filters import Text
 
-import os
-from aiogram import Bot
-
-bot = Bot(token=os.getenv("BOT_TOKEN"))
-OPERATOR_ID = 7630696066  # Замінити на свій Telegram ID
-
-bot = Bot(token=API_TOKEN)
+# Беремо токен з середовища
+TOKEN = os.getenv("BOT_TOKEN")
+bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
+
+OPERATOR_ID = 7630696066  # Замінити на свій Telegram ID
 
 user_operator_map = {}  # ID клієнта -> повідомлення
 
@@ -199,3 +198,4 @@ async def operator_reply(message: types.Message):
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
+
