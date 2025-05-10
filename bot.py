@@ -1,38 +1,47 @@
 import os
-from aiogram import Bot, Dispatcher, types, executor
+import asyncio
+from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.dispatcher.filters import Text
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import Command, Text
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
-# Беремо токен з середовища
 TOKEN = os.getenv("BOT_TOKEN")
-bot = Bot(token=TOKEN)
-dp = Dispatcher(bot, storage=MemoryStorage())
+bot = Bot(token=TOKEN, parse_mode="HTML")
+dp = Dispatcher(storage=MemoryStorage())
 
 OPERATOR_ID = 7630696066  # Замінити на свій Telegram ID
-
 user_operator_map = {}  # ID клієнта -> повідомлення
 
 # Клавіатури
-start_keyboard = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton("🚀 Почати"))
-main_menu = ReplyKeyboardMarkup(resize_keyboard=True)
-main_menu.add("🚗 Автоцивілка", "🌍 Зелена картка")
-main_menu.add("🏥 Медичне страхування")
+start_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
+    [KeyboardButton(text="🚀 Почати")]
+])
 
-back_button = KeyboardButton("🔙 На початок")
-share_phone_keyboard = ReplyKeyboardMarkup(resize_keyboard=True).add(
-    KeyboardButton("📞 Поділитися номером телефону", request_contact=True)
-)
+main_menu = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
+    [KeyboardButton(text="🚗 Автоцивілка"), KeyboardButton(text="🌍 Зелена картка")],
+    [KeyboardButton(text="🏥 Медичне страхування")]
+])
 
-auto_menu = ReplyKeyboardMarkup(resize_keyboard=True).add(
-    KeyboardButton("📄 Постійні номера"), KeyboardButton("🕘 Транзитні номера")
-).add(back_button)
+back_button = KeyboardButton(text="🔙 На початок")
 
-duration_menu = ReplyKeyboardMarkup(resize_keyboard=True)
-duration_menu.add("15 днів", "1 міс.", "2 міс.", "3 міс.").add(back_button)
+share_phone_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
+    [KeyboardButton(text="📞 Поділитися номером телефону", request_contact=True)]
+])
 
+auto_menu = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
+    [KeyboardButton(text="📄 Постійні номера"), KeyboardButton(text="🕘 Транзитні номера")],
+    [back_button]
+])
+
+duration_menu = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
+    [KeyboardButton(text="15 днів"), KeyboardButton(text="1 міс."), KeyboardButton(text="2 міс."), KeyboardButton(text="3 міс.")],
+    [back_button]
+])
+
+# Стан FSM
 class AutoForm(StatesGroup):
     number = State()
     engine = State()
@@ -47,13 +56,14 @@ class TravelInsurance(StatesGroup):
     country = State()
     duration = State()
 
-@dp.message_handler(commands=['start'])
-async def start(message: types.Message):
+@dp.message(Command("start"))
+async def start(message: types.Message, state: FSMContext):
+    await state.clear()
     await message.answer("Привіт! 👋\nНатисни \"Почати\" щоб дізнатись вартість страхування:", reply_markup=start_keyboard)
 
-@dp.message_handler(Text(equals="🚀 Почати"))
+@dp.message(Text("🚀 Почати"))
 async def on_start_pressed(message: types.Message, state: FSMContext):
-    await state.finish()
+    await state.clear()
     user = message.from_user
     if not user.username:
         await message.answer(
@@ -63,94 +73,93 @@ async def on_start_pressed(message: types.Message, state: FSMContext):
         return
     await message.answer("Обери вид страхування:", reply_markup=main_menu)
 
-@dp.message_handler(content_types=types.ContentType.CONTACT)
+@dp.message(lambda m: m.contact)
 async def contact_handler(message: types.Message):
     contact = message.contact
     await bot.send_message(OPERATOR_ID, f"📞 Користувач поділився номером: {contact.phone_number} (ID: {message.from_user.id})")
     await message.answer("✅ Дякую! Номер отримано. Оберіть вид страхування:", reply_markup=main_menu)
 
-@dp.message_handler(Text(equals="🚗 Автоцивілка"))
+@dp.message(Text("🚗 Автоцивілка"))
 async def auto_civilka(message: types.Message):
     await message.answer("Оберіть тип номерів:", reply_markup=auto_menu)
 
-@dp.message_handler(Text(equals="📄 Постійні номера"))
-async def permanent(message: types.Message):
-    await message.answer("Введіть державний номер авто:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(back_button))
-    await AutoForm.number.set()
+@dp.message(Text("📄 Постійні номера"))
+async def permanent(message: types.Message, state: FSMContext):
+    await state.set_state(AutoForm.number)
+    await message.answer("Введіть державний номер авто:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[back_button]]))
 
-@dp.message_handler(Text(equals="🕘 Транзитні номера"))
+@dp.message(Text("🕘 Транзитні номера"))
 async def transit(message: types.Message, state: FSMContext):
-    await message.answer("Введіть об'єм двигуна:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(back_button))
-    await AutoForm.engine.set()
+    await state.set_state(AutoForm.engine)
     await state.update_data(transit=True)
+    await message.answer("Введіть об'єм двигуна:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[back_button]]))
 
-@dp.message_handler(Text(equals="🔙 На початок"))
+@dp.message(Text("🔙 На початок"))
 async def go_back(message: types.Message, state: FSMContext):
-    await state.finish()
+    await state.clear()
     await message.answer("Обери вид страхування:", reply_markup=main_menu)
 
-@dp.message_handler(state=AutoForm.number)
+@dp.message(AutoForm.number)
 async def get_number(message: types.Message, state: FSMContext):
     if message.text == "🔙 На початок":
         return await go_back(message, state)
     await state.update_data(number=message.text)
-    await message.answer("Введіть об'єм двигуна:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(back_button))
-    await AutoForm.next()
+    await state.set_state(AutoForm.engine)
+    await message.answer("Введіть об'єм двигуна:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[back_button]]))
 
-@dp.message_handler(state=AutoForm.engine)
+@dp.message(AutoForm.engine)
 async def get_engine(message: types.Message, state: FSMContext):
     if message.text == "🔙 На початок":
         return await go_back(message, state)
     await state.update_data(engine=message.text)
-    await message.answer("Вкажіть місце реєстрації:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(back_button))
-    await AutoForm.next()
+    await state.set_state(AutoForm.region)
+    await message.answer("Вкажіть місце реєстрації:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[back_button]]))
 
-@dp.message_handler(state=AutoForm.region)
+@dp.message(AutoForm.region)
 async def get_region(message: types.Message, state: FSMContext):
     if message.text == "🔙 На початок":
         return await go_back(message, state)
     await state.update_data(region=message.text)
-    await message.answer("Введіть дату народження наймолодшого водія:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(back_button))
-    await AutoForm.next()
+    await state.set_state(AutoForm.birth)
+    await message.answer("Введіть дату народження наймолодшого водія:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[back_button]]))
 
-@dp.message_handler(state=AutoForm.birth)
+@dp.message(AutoForm.birth)
 async def get_birth(message: types.Message, state: FSMContext):
     if message.text == "🔙 На початок":
         return await go_back(message, state)
     await state.update_data(birth=message.text)
     data = await state.get_data()
-    if data.get('transit'):
+    if data.get("transit"):
+        await state.set_state(AutoForm.term)
         await message.answer("Оберіть термін страхування:", reply_markup=duration_menu)
-        await AutoForm.term.set()
     else:
         await send_to_operator_and_finish(message, state)
 
-@dp.message_handler(state=AutoForm.term)
+@dp.message(AutoForm.term)
 async def get_term(message: types.Message, state: FSMContext):
     if message.text == "🔙 На початок":
         return await go_back(message, state)
     await state.update_data(term=message.text)
     await send_to_operator_and_finish(message, state)
 
-async def send_to_operator_and_finish(message, state):
+async def send_to_operator_and_finish(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user = message.from_user
     username = f"@{user.username}" if user.username else user.full_name
-    text = f"📩 Запит від користувача {username} (ID: {user.id})\n"
-    text += "🚘 Запит на Автоцивілку:\n"
-    for key, val in data.items():
-        text += f"{key.capitalize()}: {val}\n"
+    text = f"📩 Запит від користувача {username} (ID: {user.id})\n🚘 Запит на Автоцивілку:\n"
+    for k, v in data.items():
+        text += f"{k.capitalize()}: {v}\n"
     msg = await bot.send_message(OPERATOR_ID, text)
     user_operator_map[msg.message_id] = user.id
     await message.answer("✅ Дані надіслані оператору. За кілька хвилин надішлемо найцікавіші варіанти страхування! 💼")
-    await state.finish()
+    await state.clear()
 
-@dp.message_handler(Text(equals="🌍 Зелена картка"))
-async def green_card(message: types.Message):
-    await message.answer("🗓️ Вкажіть на який термін бажаєте (від 15 днів до 12 міс.):", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(back_button))
-    await GreenCard.duration.set()
+@dp.message(Text("🌍 Зелена картка"))
+async def green_card(message: types.Message, state: FSMContext):
+    await state.set_state(GreenCard.duration)
+    await message.answer("🗓️ Вкажіть на який термін бажаєте (від 15 днів до 12 міс.):", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[back_button]]))
 
-@dp.message_handler(state=GreenCard.duration)
+@dp.message(GreenCard.duration)
 async def green_card_duration(message: types.Message, state: FSMContext):
     if message.text == "🔙 На початок":
         return await go_back(message, state)
@@ -159,22 +168,22 @@ async def green_card_duration(message: types.Message, state: FSMContext):
     msg = await bot.send_message(OPERATOR_ID, f"📩 Запит від користувача {username} (ID: {user.id})\n🟩 Запит на Зелену картку:\nТермін: {message.text}")
     user_operator_map[msg.message_id] = user.id
     await message.answer("✅ Дані надіслані оператору. Чекайте варіанти! 🌍")
-    await state.finish()
+    await state.clear()
 
-@dp.message_handler(Text(equals="🏥 Медичне страхування"))
-async def medical(message: types.Message):
-    await message.answer("🌍 Вкажіть країну поїздки:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(back_button))
-    await TravelInsurance.country.set()
+@dp.message(Text("🏥 Медичне страхування"))
+async def medical(message: types.Message, state: FSMContext):
+    await state.set_state(TravelInsurance.country)
+    await message.answer("🌍 Вкажіть країну поїздки:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[back_button]]))
 
-@dp.message_handler(state=TravelInsurance.country)
+@dp.message(TravelInsurance.country)
 async def get_country(message: types.Message, state: FSMContext):
     if message.text == "🔙 На початок":
         return await go_back(message, state)
     await state.update_data(country=message.text)
-    await message.answer("🗓️ Вкажіть на який термін бажаєте (від 10 днів до 12 міс.):", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True).add(back_button))
-    await TravelInsurance.duration.set()
+    await state.set_state(TravelInsurance.duration)
+    await message.answer("🗓️ Вкажіть на який термін бажаєте (від 10 днів до 12 міс.):", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[back_button]]))
 
-@dp.message_handler(state=TravelInsurance.duration)
+@dp.message(TravelInsurance.duration)
 async def medical_duration(message: types.Message, state: FSMContext):
     if message.text == "🔙 На початок":
         return await go_back(message, state)
@@ -185,9 +194,9 @@ async def medical_duration(message: types.Message, state: FSMContext):
     msg = await bot.send_message(OPERATOR_ID, f"📩 Запит від користувача {username} (ID: {user.id})\n🏥 Запит на медичне страхування:\nКраїна: {country}\nТермін: {message.text}")
     user_operator_map[msg.message_id] = user.id
     await message.answer("✅ Дані надіслані оператору. Незабаром зв’яжемось! ✈️")
-    await state.finish()
+    await state.clear()
 
-@dp.message_handler(lambda m: m.chat.id == OPERATOR_ID and m.reply_to_message)
+@dp.message(lambda m: m.chat.id == OPERATOR_ID and m.reply_to_message)
 async def operator_reply(message: types.Message):
     original_id = message.reply_to_message.message_id
     user_id = user_operator_map.get(original_id)
@@ -196,6 +205,9 @@ async def operator_reply(message: types.Message):
     else:
         await message.reply("⚠️ Не вдалося знайти користувача для відповіді.")
 
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+# Запуск
+async def main():
+    await dp.start_polling(bot)
 
+if __name__ == "__main__":
+    asyncio.run(main())
